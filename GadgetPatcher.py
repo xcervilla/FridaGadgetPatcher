@@ -4,22 +4,18 @@ import tempfile
 import zipfile
 import shutil
 import subprocess
-import time
 import pathlib
 import plistlib
 
-def checkOS():
-    if not (sys.platform.startswith("darwin")):
+def checkRequisites():
+    if not (sys.platform.startswith("darwin") or sys.platform.startswith("linux")):
         print("OS not supported by the tool, exiting program")
         exit()
-
-def getInsertDylibOption(args):
-    if args.bundled_insert_dylib:
-        return "bundled"
-    elif args.system_insert_dylib:
-        return "system"
-    else:
-        return args.external_insert_dylib
+    try:
+        proc = subprocess.run(["which", "gcc"], check=True)
+    except subprocess.CalledProcessError as cpe:
+        print("GCC compiler cannot be found in $PATH using `which`, exiting program")
+        exit()
 
 def compileInsertDylib():
     scriptPath = pathlib.Path(__file__).parent
@@ -39,29 +35,15 @@ def compileInsertDylib():
                 print("Error while compiling insert_dylib, exiting program")
                 exit()
 
-def getInsertDylibPath(insertDylibOption):
-    if insertDylibOption == "bundled":
-        binaryPath = pathlib.Path(__file__).parent.joinpath("insert_dylib")
-        if not binaryPath.exists():
-            compileInsertDylib()
-        return binaryPath
-    elif insertDylibOption == "system":
-        try:
-            proc = subprocess.run(["which", "insert_dylib"], check=True)
-            return proc.stdout
-        except subprocess.CalledProcessError as cpe:
-            print("insert_dylib binary cannot be found in $PATH using `which`, exiting program")
-            exit()
-    else:
-        if not pathlib.Path(insertDylibOption).exists():
-            print("insert_dylib binary cannot be found in the specified path, exiting program")
-            exit()
-        else:
-            return insertDylibOption
+def getInsertDylibPath():
+    binaryPath = pathlib.Path(__file__).parent.joinpath("insert_dylib")
+    if not binaryPath.exists():
+        compileInsertDylib()
+    return binaryPath
 
 
-def main(gadgetFilePath: str, ipaFilePath: str, insertDylibOption: str):
-    insertDylibPath = getInsertDylibPath(insertDylibOption)
+def main(gadgetFilePath: str, ipaFilePath: str):
+    insertDylibPath = getInsertDylibPath()
 
     tempDir = tempfile.TemporaryDirectory().name
     ipaFileName = ipaFilePath.split("/")[-1]
@@ -119,18 +101,10 @@ def main(gadgetFilePath: str, ipaFilePath: str, insertDylibOption: str):
 
 
 if __name__ == "__main__":
-    checkOS() # Checks script is running on Linux or macOS
+    checkRequisites() # Checks script is running on Linux or macOS and if GCC is installed
     # Parse args
     parser = argparse.ArgumentParser()
     parser.add_argument("frida_gadget", help="Path of the Frida Gadget dylib")
     parser.add_argument("ipa_file", help="Path of the IPA file to be patched")
-    # insert_dylib options
-    insert_dylib_mutex = parser.add_mutually_exclusive_group(required=True)
-    insert_dylib_mutex.add_argument("-bundled-insert-dylib",
-                                    action="store_true",
-                                    help="Uses bundled insert_dylib (Will compile it if not compiled)")
-    insert_dylib_mutex.add_argument("-system-insert-dylib", action="store_true", help="Search in PATH for insert_dylib binary and use it")
-    insert_dylib_mutex.add_argument("-external-insert-dylib", metavar="INSERT_DYLIB_PATH", help="Path of the insert_dylib binary")
     args = parser.parse_args()
-    insertDylibOption = getInsertDylibOption(args)
-    main(args.frida_gadget, args.ipa_file, insertDylibOption)
+    main(args.frida_gadget, args.ipa_file)
