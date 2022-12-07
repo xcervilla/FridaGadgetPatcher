@@ -12,7 +12,7 @@ def checkRequisites():
         print("OS not supported by the tool, exiting program")
         exit()
     try:
-        proc = subprocess.run(["which", "gcc"], check=True)
+        subprocess.run(["which", "gcc"], check=True, capture_output=True)
     except subprocess.CalledProcessError as cpe:
         print("GCC compiler cannot be found in $PATH using `which`, exiting program")
         exit()
