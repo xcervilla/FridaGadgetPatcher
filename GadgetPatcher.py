@@ -6,6 +6,11 @@ import shutil
 import subprocess
 import pathlib
 import plistlib
+from urllib import request
+import io
+import lzma
+import time
+import os
 
 def checkRequisites():
     if not (sys.platform.startswith("darwin") or sys.platform.startswith("linux")):
@@ -16,6 +21,28 @@ def checkRequisites():
     except subprocess.CalledProcessError as cpe:
         print("GCC compiler cannot be found in $PATH using `which`, exiting program")
         exit()
+
+def getGadget(options):
+    if options.download_gadget:
+        # Download gadget to a temp dir
+        versionResponse = request.urlopen("https://github.com/frida/frida/releases/latest")
+        latestVersion = versionResponse.url.split("/")[-1]
+        gitHubUrl = "https://github.com/frida/frida/releases/download/{%VERSION%}/frida-gadget-{%VERSION%}-ios-universal.dylib.xz"
+        with request.urlopen(gitHubUrl.replace("{%VERSION%}", latestVersion)) as response:
+            if response.status != 200:
+                print("Response returned while downloading Gadget was not 200 OK. Exiting")
+                exit()
+            gadgetData = io.BytesIO(response.read())
+        # Uncompress XZ file
+        uncompressedGadget = lzma.open(gadgetData) 
+        # Write to temp file
+        gadgetTempFile = tempfile.NamedTemporaryFile("wb", suffix=".tmpdylib", delete=False)
+        gadgetTempFile.write(uncompressedGadget.read())
+        print(gadgetTempFile.name)
+        return gadgetTempFile.name           
+        
+    else:
+        return options.gadget
 
 def compileInsertDylib():
     scriptPath = pathlib.Path(__file__).parent
@@ -72,6 +99,9 @@ def main(gadgetFilePath: str, ipaFilePath: str):
 
     # Move FridaGadget.dylib into Frameworks dir
     shutil.copyfile(gadgetFilePath, frameworksDir.joinpath("FridaGadget.dylib"))
+    # Delete src gadget file if is temp
+    if gadgetFilePath.endswith(".tmpdylib"):
+        os.remove(gadgetFilePath)
 
     # Parse Info.plist to get binary name
     with open(str(appDir.joinpath("Info.plist")), "rb") as f:
@@ -98,13 +128,18 @@ def main(gadgetFilePath: str, ipaFilePath: str):
     
     # Re-Compress again the IPA
     shutil.make_archive("PATCHED_{}".format(ipaFileName), "zip", tempDir)
+    os.rename("PATCHED_{}.zip".format(ipaFileName),"PATCHED_{}".format(ipaFileName))
 
 
 if __name__ == "__main__":
     checkRequisites() # Checks script is running on Linux or macOS and if GCC is installed
     # Parse args
     parser = argparse.ArgumentParser()
-    parser.add_argument("frida_gadget", help="Path of the Frida Gadget dylib")
     parser.add_argument("ipa_file", help="Path of the IPA file to be patched")
+    # Gadget Mutex
+    gadgetMutex = parser.add_mutually_exclusive_group()
+    gadgetMutex.add_argument("--gadget", metavar="FRIDA_GADGET_PATH", help="Path of the Frida Gadget dylib")
+    gadgetMutex.add_argument("--download-gadget", action="store_true", help="Downloads latest iOS FridaGadget from GitHub")
     args = parser.parse_args()
-    main(args.frida_gadget, args.ipa_file)
+    gadgetPath = getGadget(args)
+    main(gadgetPath, args.ipa_file)
